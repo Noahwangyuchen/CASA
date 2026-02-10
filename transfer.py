@@ -4,50 +4,42 @@ import numpy as np
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import connected_components
 
-def identity_transfer(B, A, U_s, S_s, Vh_s, Cdst):
-    return B, A
-
-
 def cluster_aware_spectral_arbitration(B, A, 
                                   U_s, S_s, Vh_s, 
                                   Cfft,  
                                   rotation_threshold=0.5,
                                   q_threshold=0.5,
                                   arbitrate_q=0.85,
-                                  target_rank=32,
-                                  lora_scale=1.0):
+                                  target_rank=32):
     """
-    核心逻辑：
-    1. 密度分级: 确定 High Mask (保护区) 和 Low Mask (背景区)。
-    2. 混合评分指标 (Hybrid Metric):
+    CASA algorithm:
+    1. Density stratification: identify Dominant and Non-Dominant regions.
+    2. Hybrid scoring metric:
        - Score = Pixel_Energy * Context_Factor
-       - Pixel_Energy = |Cs * Cdst| (点积能量)
+       - Pixel_Energy = |Clora * Cfft|
        - Context_Factor:
-         >> Top-K 区域内: Block Cosine Similarity (簇级方向一致性)
-         >> Top-K 区域外: 1.0 
-    3. 策略:
-       - 在 Low Mask 区域直接置为 Cs - Cdst，力求还原 LoRA 作用。
-       - 在 High Mask 区域内的同号像素中，计算 Score 的分位数。
-       - Score > Threshold 的像素 -> 仲裁成 max(Cs, Cdst) - Cdst 防止过度激活。
-       - 其他 -> 置为 Cs。
+         >> Inside Top-K: Block Cosine Similarity (cluster-level directional consistency)
+         >> Outside Top-K: 1.0
+    3. Strategy:
+       - In Low Mask regions, directly use Clora - Cfft to preserve LoRA effect.
+       - In High Mask regions with same-sign pixels, compute score quantiles.
+       - Pixels with Score > Threshold are arbitrated as max(Clora, Cfft) - Cfft
+         to prevent over-activation.
+       - Others are set to Clora.
     """
     print(f"--- Starting CASA ---")
     
     # =========================================================
-    # Step 0: 基础定义与投影 (保持不变)
+    # Step 0: Base definitions and projection
     # =========================================================
     device = B.device
     D_out, D_in = Cfft.shape
-
-    B = B * lora_scale
-    A = A * lora_scale
-    print(f"Scalings: B={lora_scale}, A={lora_scale}")
     
     M_left = U_s.t() @ B
     M_right = A @ Vh_s.t()
-    Cs = M_left @ M_right
+    Clora = M_left @ M_right
 
-    if Cs.shape[0] == Cs.shape[1]: 
+    if Clora.shape[0] == Clora.shape[1]: 
         energies = S_s ** 2
         cumulative_energy = torch.cumsum(energies, dim=0) / energies.sum()
         k_dynamic = torch.where(cumulative_energy >= 0.90)[0]
@@ -56,12 +48,12 @@ def cluster_aware_spectral_arbitration(B, A,
         k = S_s.size(0)
     
     # =========================================================
-    # Step 1: 微扰分簇 (保持不变)
+    # Step 1: Perturbation-based clustering
     # =========================================================
-    Cs_k = Cs[:k, :k]
+    Clora_k = Clora[:k, :k]
     S_k = S_s[:k]
     
-    M_force = torch.abs(Cs_k)
+    M_force = torch.abs(Clora_k)
     S_matrix = S_k.unsqueeze(1)
     Gap_matrix = torch.abs(S_matrix - S_matrix.t())
     M_predicted_rotation = M_force / (Gap_matrix + 1e-6)
@@ -79,14 +71,14 @@ def cluster_aware_spectral_arbitration(B, A,
     print(f"Identified {n_clusters} clusters.")
 
     # =========================================================
-    # Step 2: 密度筛选 (单阈值 q_threshold)
+    # Step 2: Density filtering (single threshold q_threshold)
     # =========================================================
-    Cdst_k = Cfft[:k, :k]
+    Cfft_k = Cfft[:k, :k]
     M_mat = torch.nn.functional.one_hot(labels.long(), num_classes=n_clusters).float().t()
     Cluster_Sizes = M_mat.sum(dim=1) + 1e-6
     
-    Rx_Density = (M_mat @ torch.norm(Cdst_k, dim=1)) / Cluster_Sizes
-    Tx_Density = (M_mat @ torch.norm(Cdst_k, dim=0)) / Cluster_Sizes
+    Rx_Density = (M_mat @ torch.norm(Cfft_k, dim=1)) / Cluster_Sizes
+    Tx_Density = (M_mat @ torch.norm(Cfft_k, dim=0)) / Cluster_Sizes
     
     rx_th = torch.quantile(Rx_Density, q_threshold)
     tx_th = torch.quantile(Tx_Density, q_threshold)
@@ -94,7 +86,7 @@ def cluster_aware_spectral_arbitration(B, A,
     cl_rx_high = torch.where(Rx_Density >= rx_th)[0]
     cl_tx_high = torch.where(Tx_Density >= tx_th)[0]
     
-    # 构造 High Mask (覆盖全量)
+    # Build High Mask (expanded to full matrix shape)
     idx_rx = torch.isin(labels, cl_rx_high)
     idx_tx = torch.isin(labels, cl_tx_high)
     full_rows = torch.zeros(D_out, dtype=torch.bool, device=device); full_rows[:k] = idx_rx
@@ -102,53 +94,53 @@ def cluster_aware_spectral_arbitration(B, A,
     mask_high = full_rows.unsqueeze(1) | full_cols.unsqueeze(0)
 
     # =========================================================
-    # Step 3: 构建混合评分矩阵 (Hybrid Score Matrix)
+    # Step 3: Build hybrid score matrix
     # =========================================================
     
-    # 1. 计算 Pixel 级能量
-    pixel_energy_map = (Cs * Cfft).abs()
+    # 1) Compute pixel-level energy
+    pixel_energy_map = (Clora * Cfft).abs()
     
-    # 2. 计算 Block 级 Cosine (仅在 Top-K 内)
-    dot_prod = M_mat @ (Cs_k * Cdst_k) @ M_mat.t()
-    norm_cs = torch.sqrt(M_mat @ (Cs_k**2) @ M_mat.t())
-    norm_cdst = torch.sqrt(M_mat @ (Cdst_k**2) @ M_mat.t())
-    block_cosine = dot_prod / (norm_cs * norm_cdst + 1e-8)
+    # 2) Compute block-level cosine (Top-K only)
+    dot_prod = M_mat @ (Clora_k * Cfft_k) @ M_mat.t()
+    norm_clora = torch.sqrt(M_mat @ (Clora_k**2) @ M_mat.t())
+    norm_cfft = torch.sqrt(M_mat @ (Cfft_k**2) @ M_mat.t())
+    block_cosine = dot_prod / (norm_clora * norm_cfft + 1e-8)
     
-    # 3. 将 Block Cosine 映射回 Pixel 空间 (Context Factor)
-    # 初始化全为 1.0 (Top-K 以外的区域默认乘 1)
-    context_factor_map = torch.ones((D_out, D_in), device=device, dtype=Cs.dtype)
+    # 3) Map block cosine back to pixel space (context factor)
+    # Initialize with 1.0 everywhere (outside Top-K defaults to multiplier 1)
+    context_factor_map = torch.ones((D_out, D_in), device=device, dtype=Clora.dtype)
     
-    # 在 Top-K 区域填入对应的 Block Cosine
+    # Fill Top-K region with corresponding block cosine values
     # M_mat.T [k, n] @ [n, n] @ [n, k] -> [k, k]
     pixel_level_block_cosine = M_mat.t() @ block_cosine @ M_mat
     context_factor_map[:k, :k] = pixel_level_block_cosine
     
-    # 4. 最终混合得分
+    # 4) Final hybrid score
     # Score = Pixel_Energy * Context_Factor
-    # 注意: 如果 block cosine 是负的(方向冲突)，这里得分为负，自然会被 quantile 淘汰
+    # Note: if block cosine is negative (direction conflict), the score is negative
+    # and is naturally filtered out by quantile thresholding.
     hybrid_score = pixel_energy_map * context_factor_map
 
     # =========================================================
-    # Step 4: 策略执行
+    # Step 4: Apply arbitration strategy
     # =========================================================
-    mask_diff = (Cs.sign() != Cfft.sign())
-    mask_same = (Cs.sign() == Cfft.sign())
+    mask_same = (Clora.sign() == Cfft.sign())
     
-    Cs_new = Cs - Cfft
+    Clora_new = Clora - Cfft
     
-    Cs_new[mask_high] = Cs[mask_high]
-    # 2. High & 同号 -> 基于 Hybrid Score 仲裁
+    Clora_new[mask_high] = Clora[mask_high]
+    # 2) High & same-sign -> arbitrate using Hybrid Score
     mask_high_same = mask_high & mask_same
     
-    # 提取待筛选区域的分数
+    # Extract scores from candidate region
     if mask_high_same.sum() > 0:
         candidate_scores = hybrid_score[mask_high_same]
         
-        # 计算阈值
+        # Compute threshold
         num_elements = candidate_scores.numel()
         max_samples = 10_000_000
         if num_elements > max_samples:
-            # 随机采样
+            # Random sampling
             indices = torch.randperm(num_elements, device=candidate_scores.device)[:max_samples]
             sample_for_quantile = candidate_scores[indices]
             score_thresh = torch.quantile(sample_for_quantile, arbitrate_q)
@@ -157,15 +149,15 @@ def cluster_aware_spectral_arbitration(B, A,
         
         mask_suppress = mask_high_same & (hybrid_score > score_thresh)
 
-        max_val = torch.where(Cs.abs() > Cfft.abs(), Cs, Cfft)
+        max_val = torch.where(Clora.abs() > Cfft.abs(), Clora, Cfft)
         C_arbitrated = max_val - Cfft
-        Cs_new[mask_suppress] = C_arbitrated[mask_suppress]
+        Clora_new[mask_suppress] = C_arbitrated[mask_suppress]
         print(f"Suppressed {mask_suppress.sum().item()} pixels.")
 
     # =========================================================
-    # Step 4: 重构
+    # Step 5: Reconstruct LoRA factors
     # =========================================================
-    U_c, S_c, V_c = torch.svd_lowrank(Cs_new, q=target_rank, niter=6)
+    U_c, S_c, V_c = torch.svd_lowrank(Clora_new, q=target_rank, niter=6)
     Vh_c = V_c.t() 
     
     sqrt_S = torch.diag(torch.sqrt(S_c))
@@ -178,17 +170,17 @@ def cluster_aware_spectral_arbitration(B, A,
 def transfer_lora(
     lora_state,
     svd_src,
-    dict_Cdst,
+    dict_Cfft,
     transfer_method,
     ignore_keywords=None,
     transfer_kwargs=None,
 ):
     """
-    lora_state: LoRA 参数字典
-    svd_src, svd_tgt: dict[layer_name] -> {"U":..., "S":..., "Vh":...}
-    output_path: 保存 spectral transport 后的 LoRA
-    transfer_method: 指定 transfer 方法，可以是函数或预设的名称
-    transfer_kwargs: 透传给具体 transfer 方法的参数
+    lora_state: LoRA parameter state dict.
+    svd_src: source spectral basis dict[layer_name] -> {"U":..., "S":..., "Vh":...}.
+    dict_Cfft: target Cfft map dict[layer_name] -> Tensor.
+    transfer_method: transfer method (callable or predefined name).
+    transfer_kwargs: kwargs forwarded to the selected transfer method.
     """
 
     new_state = {}
@@ -205,14 +197,14 @@ def transfer_lora(
         raise ValueError(f"Unknown transfer_method: {transfer_method}")
     print(f"Using transfer method: {transfer_fn.__name__}")
 
-    # 透传参数（默认兼容 use_basis_transfer）
+    # Forward kwargs (kept compatible with use_basis_transfer defaults)
     kwargs = dict(transfer_kwargs or {})
 
     for key in list(lora_state.keys()):
         if key in processed or (ignore_keywords and any(kw in key for kw in ignore_keywords)):
             continue
         
-        # 识别 LoRA A 的 key
+        # Detect LoRA A key
         if key.endswith("lora_A.weight"):
             prefix = key[:-len(".lora_A.weight")]
             key_A = key
@@ -222,13 +214,13 @@ def transfer_lora(
             key_A = key
             key_B = prefix + ".lora_up.weight"
         else:
-            # 非 A/down 的权重先不动，暂存一下，后面统一拷贝
+            # Skip non-A/down weights for now; copy handling is done later
             continue
 
-        print(f"Transfering LoRA as {prefix} ...")
+        print(f"Transferring LoRA as {prefix} ...")
 
         if key_B not in lora_state:
-            # 没找到成对的 B/up，直接原样拷贝 A 再说
+            # If paired B/up is missing, keep A unchanged
             print(f"[WARN] Pair not found for {key_A}, skip spectral transport.")
             new_state[key_A] = lora_state[key_A]
             continue
@@ -236,7 +228,7 @@ def transfer_lora(
         processed.add(key_A)
         processed.add(key_B)
 
-        # 推出 base 权重的层名，比如 blocks.0.self_attn.q.weight
+        # Infer base weight name, e.g. blocks.0.self_attn.q.weight
         svd_keys = list(svd_src.keys())  # or svd_wan_1_3.keys()
         base_weight_name = utils.auto_map_lora_key_to_svd_key(prefix, svd_keys)
 
@@ -247,34 +239,29 @@ def transfer_lora(
             print(f"[WARN] {base_weight_name} not found in SVD dicts, skip it.")
             continue
 
-        # 取出 LoRA A/B
+        # Load LoRA A/B
         A = lora_state[key_A]  # [r, n] or [r, in]
         B = lora_state[key_B]  # [m, r] or [out, r]
         dtype = A.dtype
         A_f = A.to(torch.float32).cuda()
         B_f = B.to(torch.float32).cuda()
 
-        # 取源/目标 SVD
+        # Load source spectral basis and target Cfft map
         U_s = svd_src[base_weight_name]["U"].to(torch.float32).cuda()
         S_s = svd_src[base_weight_name]["S"].to(torch.float32).cuda()
         Vh_s = svd_src[base_weight_name]["Vh"].to(torch.float32).cuda()
-        C_dst = dict_Cdst[base_weight_name].to(torch.float32).cuda()
+        Cfft_layer = dict_Cfft[base_weight_name].to(torch.float32).cuda()
         
-        # 调用 transfer 函数
-        B_new, A_new = transfer_fn(B_f, A_f, U_s, S_s, Vh_s, C_dst, **kwargs)
+        # Apply transfer function
+        B_new, A_new = transfer_fn(B_f, A_f, U_s, S_s, Vh_s, Cfft_layer, **kwargs)
 
         new_state[key_A] = A_new
         new_state[key_B] = B_new
         print(f"[OK] transported LoRA for {base_weight_name}")
 
-    # # 把未处理的参数原样拷贝（比如 alpha, scaling, 其他 bias）
-    # for key, value in lora_state.items():
-    #     if key not in new_state:
-    #         new_state[key] = value
 
     for k, v in list(new_state.items()):
         if isinstance(v, torch.Tensor):
             new_state[k] = v.contiguous()
     
     return new_state
-
