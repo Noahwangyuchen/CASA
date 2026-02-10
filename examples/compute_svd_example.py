@@ -16,7 +16,7 @@ pipe = WanPipeline.from_pretrained(model_id, vae=vae, torch_dtype=torch.bfloat16
 
 transformer = pipe.transformer 
 
-save_dir = "/data/wangyuchen/video_lora/svd_results/"
+save_dir = "/data/svd_results/"
 os.makedirs(save_dir, exist_ok=True)
 
 svd_results = {}

@@ -58,6 +58,50 @@ python inference.py \
     --use_ema
 ```
 
+### Inference with LoRA
+
+`inference.py` in this repository supports loading LoRA and merging it into the generator before sampling:
+
+```bash
+python inference.py \
+  --config_path configs/rolling_forcing_dmd.yaml \
+  --output_folder videos/rolling_forcing_lora \
+  --checkpoint_path checkpoints/rolling_forcing_dmd.pt \
+  --data_path prompts/example_prompts.txt \
+  --num_output_frames 126 \
+  --use_ema \
+  --lora_path /path/to/transferred_lora.safetensors \
+  --lora_scale 1.0
+```
+
+### Important Arguments in `inference.py`
+
+- `--config_path`: model/inference config.
+- `--checkpoint_path`: distilled model checkpoint (`.pt`).
+- `--data_path`: prompt file path (or text-image pairs when `--i2v` is used).
+- `--extended_prompt_path`: optional extended prompts for T2V.
+- `--output_folder`: output directory for generated videos.
+- `--num_output_frames`: number of generated latent frames per sample window.
+- `--num_samples`: number of videos per prompt.
+- `--save_with_index`: use dataset index as output filename.
+- `--lora_path`, `--lora_scale`: LoRA checkpoint and merge scale.
+- `--text_encoder_cpu_offload`: keep text encoder on CPU to reduce VRAM.
+- `--vae_cpu_offload`: keep VAE on CPU to reduce VRAM (slower).
+- `--vae_decode_on_cpu`: decode frames on CPU when VAE offload is enabled.
+
+### Distributed Inference
+
+`inference.py` supports distributed inference when launched with `torchrun` and `LOCAL_RANK` is set:
+
+```bash
+torchrun --nproc_per_node=2 inference.py \
+  --config_path configs/rolling_forcing_dmd.yaml \
+  --checkpoint_path checkpoints/rolling_forcing_dmd.pt \
+  --data_path prompts/example_prompts.txt \
+  --output_folder videos/rolling_forcing_multi_gpu \
+  --use_ema
+```
+
 ### Gradio demo (minimal UI)
 Run a local web demo that takes a text prompt and shows the generated video.
 

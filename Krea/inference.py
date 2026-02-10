@@ -58,7 +58,7 @@ def _print_config_summary(config_path: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config_path", default="/workspace/usr/yuchen/krea/configs/self_forcing_server_14b.yaml")
+    parser.add_argument("--config_path", default="configs/self_forcing_server_14b.yaml")
     parser.add_argument("--output_dir", default="outputs/samples")
     parser.add_argument("--fps", type=int, default=24)
     parser.add_argument("--lora_path", default=None)

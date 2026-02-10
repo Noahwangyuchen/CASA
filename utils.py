@@ -3,7 +3,7 @@ import re
 import io
 import pickle
 
-### custom unpickler to load SVD results to specified device
+# custom unpickler to load SVD results to specified device
 class CPU_Unpickler(pickle.Unpickler):
     def __init__(self, file, device):
         super().__init__(file)
@@ -23,30 +23,6 @@ def load_results(path, device=None):
         with open(path, "rb") as f:
             return CPU_Unpickler(f, device).load()
 
-def space_similarity(U1, U2):
-    """
-    U1, U2: torch.Tensor, shape [m, m]
-    Returns: similarity
-    """
-    # Ensure float32/64
-    U1 = U1.to(torch.float32)
-    U2 = U2.to(torch.float32)
-
-    m = U1.shape[0]
-    sim = torch.norm(U1.T @ U2, p='fro')**2 / m
-    return sim.item()
-
-def principal_singular_values(U1, U2, top_k=None):
-    # U1, U2: [m, m]
-    U1 = U1.to(torch.float32)
-    U2 = U2.to(torch.float32)
-    if top_k is not None:
-        U1 = U1[:, :top_k]
-        U2 = U2[:, :top_k]
-    M = U1.T @ U2
-    # SVD of M
-    s = torch.linalg.svdvals(M)
-    return s 
 
 # ==== Layer-name normalization ====
 def unify_layer_names_with_rules(svd_dict, mapping_rules, ignore_keywords=None, debug=False):
@@ -121,23 +97,3 @@ def auto_map_lora_key_to_svd_key(lora_key, svd_keys, debug=False):
         base = base + ".weight"
 
     return base
-
-def align_signs(U_ref, Vh_ref, U_tgt, Vh_tgt):
-    """
-    Simple sign alignment to avoid Clora/Cfft mismatch caused by sign flips.
-    Only flips the target factors; physical meaning is unchanged.
-    """
-    # Compute dot products between corresponding vectors
-    # U_ref: [M, R], U_tgt: [M, R]
-    overlap = torch.sum(U_ref * U_tgt, dim=0)
-    sign = torch.sign(overlap)
-    sign[sign == 0] = 1
-    
-    U_aligned = U_tgt * sign.unsqueeze(0)
-
-    overlap = torch.sum(Vh_ref * Vh_tgt, dim=1)
-    sign = torch.sign(overlap)
-    sign[sign == 0] = 1
-    Vh_aligned = Vh_tgt * sign.unsqueeze(1)
-    
-    return U_aligned, Vh_aligned

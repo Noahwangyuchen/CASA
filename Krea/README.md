@@ -194,6 +194,39 @@ python sample_run.py
 
 ---
 
+## Inference Script in This Repository (`inference.py`)
+
+This repo also provides a lightweight inference entrypoint:
+
+```bash
+python inference.py \
+  --config_path configs/self_forcing_server_14b.yaml \
+  --output_dir outputs/samples \
+  --fps 24
+```
+
+### LoRA Inference
+
+You can inject a LoRA directly at runtime:
+
+```bash
+python inference.py \
+  --config_path configs/self_forcing_server_14b.yaml \
+  --output_dir outputs/samples_lora \
+  --lora_path /path/to/transferred_lora.safetensors \
+  --lora_scale 1.0 \
+  --fps 24
+```
+
+### Notes
+
+- Prompts are defined inside `inference.py` (`prompts` list).
+- Generation settings are also defined in code via `GenerateParams` (resolution, seed, number of blocks, etc.).
+- `inference.py` creates a temporary config file when `--lora_path` is provided, then removes it automatically.
+- Video saving requires `ffmpeg`.
+
+---
+
 ## Repository Structure
 
 ```
