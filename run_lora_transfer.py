@@ -123,7 +123,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     single = parser.add_argument_group("single-file mode")
     single.add_argument("--svd-src-path", help="Source SVD pickle path")
     single.add_argument("--cfft-path", dest="cfft_path", help="Target Cfft pickle path")
-    single.add_argument("--cdst-path", dest="cfft_path", help=argparse.SUPPRESS)
 
     multi = parser.add_argument_group("multi-part mode")
     multi.add_argument(
@@ -135,7 +134,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         dest="cfft_pattern",
         help='Cfft pattern, e.g. "/path/FastWan_part{part}.pkl"',
     )
-    multi.add_argument("--cdst-pattern", dest="cfft_pattern", help=argparse.SUPPRESS)
     multi.add_argument(
         "--num-parts",
         type=int,
