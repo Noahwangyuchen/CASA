@@ -1,69 +1,67 @@
+<div align="center">
+
 # Exploring Data-Free LoRA Transferability for Video Diffusion Models
 
-This repository contains the implementation for the paper **Exploring Data-Free LoRA Transferability for Video Diffusion Models**.
+**CASA: a data-free, training-free method for transferring LoRA between video diffusion models**
 
-This repository mainly focuses on the implementation of **CASA**, a **data-free** and **training-free** weight-space algorithm that transfers a LoRA trained on a **source model** to a **distilled target video diffusion model**.
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](#-installation)
+[![Method](https://img.shields.io/badge/Method-CASA-orange)](#-what-is-casa)
+[![Scope](https://img.shields.io/badge/Target-Video%20Diffusion-green)](#-quick-start)
 
-## What CASA Uses
+</div>
+ 
+## 💡 TL;DR
 
-CASA relies on:
+This repository focuses on **CASA**, a practical pipeline to transfer a LoRA trained on a **source model** (e.g., Wan 2.1 14B) to a **distilled target model** (e.g., Krea / Rolling Forcing) **without extra data or finetuning**.
 
-1. **SVD decomposition of the source model weights**.
-2. **Routing Pattern (Cfft)** of target-model weight drift projected into the source model subspace.
-3. The LoRA weights to be transferred.
+- No target-domain training data required.
+- No additional optimization loop required.
+- Works directly in spectral/weight space from model weights + LoRA.
 
-Using these components, CASA computes layer-wise arbitration in spectral space and reconstructs transferable LoRA factors for the distilled model.
+## 🧠 What Is CASA
 
-## Repository Layout
+CASA (Cluster-Aware Spectral Arbitration) transfers LoRA by combining:
 
-- `transfer.py`: CASA core algorithm and LoRA transfer entry (`transfer_lora`).
-- `run_lora_transfer.py`: CLI script for transferring LoRA with CASA.
-- `examples/compute_svd_example.py`: example for computing source-model SVD.
-- `examples/compute_cfft_example.py`: example for computing target Routing Pattern (Cfft).
-- `Krea/`: LoRA-enabled inference support for Krea and related optimizations (including model loading flow improvements).
-- `RollingForcing/`: LoRA-enabled inference support for Rolling Forcing.
+1. Source-model SVD basis (`U/S/Vh`).
+2. Target Routing Pattern (`Cfft`) projected in source subspace.
+3. Original LoRA factors (`A/B` or `down/up`).
 
-## Environment
+It performs layer-wise spectral arbitration and reconstructs transferred LoRA factors for the target model.
 
-Recommended Python: `>=3.10`
+## 📁 Repository Layout
 
-Install dependencies (adjust CUDA/PyTorch to your environment):
+- `transfer.py`: core CASA algorithm and `transfer_lora` entry.
+- `run_lora_transfer.py`: CLI for single-file and multi-part transfer.
+- `utils.py`: I/O, key mapping, and helper utilities.
+- `examples/compute_svd_example.py`: example for source SVD extraction.
+- `examples/compute_cfft_example.py`: example for target `Cfft` computation.
+- `Krea/`: target-side inference integration for Krea.
+- `RollingForcing/`: target-side inference integration for Rolling Forcing.
+
+## 🛠️ Installation
+
+Recommended Python: `3.10+`
 
 ```bash
 pip install torch safetensors scipy numpy
 ```
 
-For `examples/*` scripts, you may also need:
+For scripts under `examples/`:
 
 ```bash
 pip install diffusers transformers accelerate
 ```
 
-## Workflow
+## 🚀 Quick Start
 
-### 1. Compute source-model SVD
+### 1) Prepare source SVD and target Cfft
 
-You may refer to:
+Use the provided examples as templates:
 
 - `examples/compute_svd_example.py`
-
-This script demonstrates extracting per-layer `U/S/Vh` from source model weights and saving them as `.pkl` shards.
-
-### 2. Compute target Routing Pattern (Cfft)
-
-You may refer to:
-
 - `examples/compute_cfft_example.py`
 
-Given source SVD and target weights, this script computes projected weight drift (`Cfft`) in source subspace and stores it as `.pkl` shards.
-
-### 3. Run CASA LoRA transfer
-
-Use:
-
-- `run_lora_transfer.py`
-
-#### Single-file mode
+### 2) Run LoRA transfer (single-file mode)
 
 ```bash
 python run_lora_transfer.py \
@@ -75,28 +73,44 @@ python run_lora_transfer.py \
   --transfer-kwargs '{"rotation_threshold":0.5,"q_threshold":0.3,"arbitrate_q":0.85,"target_rank":32}'
 ```
 
-#### Multi-part mode
+### 3) Run LoRA transfer (multi-part mode)
 
 ```bash
 python run_lora_transfer.py \
   --lora-path /path/to/input_lora.safetensors \
-  --svd-src-pattern "/path/to/source_part{part}.pkl" \
-  --cfft-pattern "/path/to/target_part{part}.pkl" \
+  --svd-src-pattern '/path/to/source_part{part}.pkl' \
+  --cfft-pattern '/path/to/target_part{part}.pkl' \
   --num-parts 8 \
   --output-path /path/to/output_lora.safetensors \
   --method CASA \
   --transfer-kwargs '{"rotation_threshold":0.5,"q_threshold":0.3,"arbitrate_q":0.85,"target_rank":32}'
 ```
 
-## Notes
-- You may need to adapt key mapping in example scripts depending on your model checkpoint naming.
+## ⚙️ Important CLI Arguments
 
-## Krea and Rolling Forcing Support
+- `--method`: transfer method name (default `CASA`).
+- `--load-device`: device used to load SVD/Cfft pickle files (default `cpu`).
+- `--ignore-keyword`: skip matching LoRA layers (repeatable).
+- `--transfer-kwargs`: JSON for CASA hyperparameters.
+- `--svd-src-path` + `--cfft-path`: single-file mode.
+- `--svd-src-pattern` + `--cfft-pattern` + `--num-parts`: multi-part mode.
 
-This repository also includes LoRA-enabled inference support for the two distilled target models used in the paper:
+## 🔌 Use Transferred LoRA in Target Projects
 
-- **Krea**
-- **Rolling Forcing**
+After generating `output_lora.safetensors`, run model-side inference in:
 
-Please refer to subproject files in `Krea/` and `RollingForcing/` for model-specific inference commands and settings.
+- `Krea/README.md`
+- `RollingForcing/README.md`
 
+Both subprojects already include LoRA loading options in their inference flows.
+
+## 📝 Notes
+
+- Key naming may differ across checkpoints; update mapping logic if needed.
+- `examples/` scripts are intentionally minimal and should be adapted to your storage paths and model structure.
+- Transfer currently expects CUDA availability during CASA computation in `transfer.py`.
+
+## 🙏 Acknowledgements
+
+- [Self-Forcing](https://github.com/guandeh17/Self-Forcing)
+- [Wan](https://github.com/Wan-Video/Wan2.1)
