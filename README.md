@@ -199,6 +199,7 @@ Important CASA kwargs:
 - `target_rank`: rank of the reconstructed target LoRA.
 
 ## Target Model Inference
+We provide inference-with-LoRA integration for [Krea](https://huggingface.co/krea/krea-realtime-video) and [Rolling Forcing](https://github.com/TencentARC/RollingForcing) here as this feature is not supported in their code. [FastWan](https://github.com/hao-ai-lab/fastvideo) supports this feature natively.
 
 After generating `casa_transferred_lora.safetensors`, use the target-specific
 inference code.
