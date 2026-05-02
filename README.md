@@ -1,6 +1,6 @@
 <div align="center">
 
-# Exploring Data-Free LoRA Transferability for Video Diffusion Models (ICML2026)
+# Exploring Data-Free LoRA Transferability for Video Diffusion Models (ICML 2026)
 
 **Cluster-Aware Spectral Arbitration for data-free LoRA transfer in video diffusion models (CASA)**
 
