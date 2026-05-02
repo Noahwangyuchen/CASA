@@ -1,8 +1,8 @@
 <div align="center">
 
-# CASA
+# Exploring Data-Free LoRA Transferability for Video Diffusion Models (ICML2026)
 
-**Cluster-Aware Spectral Arbitration for data-free LoRA transfer in video diffusion models**
+**Cluster-Aware Spectral Arbitration for data-free LoRA transfer in video diffusion models (CASA)**
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](#installation)
 [![Method](https://img.shields.io/badge/Method-Data--free%20LoRA%20Transfer-orange)](#what-casa-does)
@@ -243,6 +243,9 @@ checkpoint downloads, and additional inference options.
   source SVD and target `Cfft` dictionaries.
 - For very large models, prefer sharded SVD and `Cfft` files and run
   `run_lora_transfer.py` in multi-part mode.
+
+## Citation
+
 
 ## Acknowledgements
 
