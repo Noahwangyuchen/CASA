@@ -4,10 +4,6 @@
 
 **Cluster-Aware Spectral Arbitration for data-free LoRA transfer in video diffusion models (CASA)**
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](#installation)
-[![Method](https://img.shields.io/badge/Method-Data--free%20LoRA%20Transfer-orange)](#what-casa-does)
-[![Models](https://img.shields.io/badge/Target-Distilled%20Video%20Diffusion-green)](#target-model-inference)
-
 </div>
 
 ![CASA qualitative comparison](assets/image.png)
@@ -16,6 +12,8 @@
 
 This repository contains the code for **CASA**, the method from
 **"Exploring Data-Free LoRA Transferability for Video Diffusion Models"**.
+
+[Paper link](https://arxiv.org/abs/2605.01929)
 
 The paper studies a common failure case in current video diffusion model
 ecosystems: a LoRA trained on a base model, such as Wan2.1, often works poorly
